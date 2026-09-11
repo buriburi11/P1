@@ -1,0 +1,2 @@
+UserID: registered-test
+Tier: REGISTERED

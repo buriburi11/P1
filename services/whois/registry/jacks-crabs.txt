@@ -1,0 +1,6 @@
+Domain: jacks-crabs
+Registrar: Jack's Registry Inc.
+Status: active
+Created: 2025-01-01
+Updated: 2025-06-15
+Expires: 2026-01-01

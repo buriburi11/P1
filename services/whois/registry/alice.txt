@@ -1,0 +1,2 @@
+UserID: alice
+Tier: REGISTERED
