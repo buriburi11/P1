@@ -93,7 +93,47 @@ public class Gateway {
             IncomingRequest request = readRequest(client.getInputStream());
 
             // Use request, backends, and fllm to implement the behavior above.
-            throw new UnsupportedOperationException("TODO: implement serve");
+
+            // validate if requested path is not /chat
+            // ex /chat = go ahead, /yo = throw error 404
+            if (!"/chat".equals(request.path())) {
+                writeSafely(client, 404, "Not Found", "Not Found\n");
+                return;
+            }
+
+            // validate if http request is only post, if not post send error
+            if(!"POST".equalsIgnoreCase(request.method())){
+                writeResponse(client.getOutputStream(), 405, "method not allowed", "Use POST for /chat\n", Map.of("Allow", "POST"));
+                return;
+            }
+
+            // check for valid x-user-id
+            String userID = request.headers().get("x-user-id");
+
+            if(userID == null || userID.isBlank()){
+                throw new RequestException("X-User-ID is missing a header");
+            }
+
+  
+
+
+            // Temporary test — remove when you start Part 3
+            String query = new String(request.body(), StandardCharsets.UTF_8);
+            String userId = request.headers().get("x-user-id");
+            String reply = "Parsed OK\nUser: " + userId + "\nQuery: " + query + "\n";
+
+            if (!request.path().equals("/chat")) {
+                writeResponse(client.getOutputStream(), 404, "Not Found", "Not found.\n");
+                return;
+            }
+            if (!request.method().equals("POST")) {
+                writeResponse(client.getOutputStream(), 405, "Method Not Allowed",
+                    "Use POST for /chat.\n", Map.of("Allow", "POST"));
+                return;
+            }
+            writeResponse(client.getOutputStream(), 200, "OK", reply);
+            //throw new UnsupportedOperationException("TODO: implement serve");
+
         } catch (RequestException exception) {
             writeSafely(client, 400, "Bad Request", exception.getMessage() + "\n");
         } catch (Exception exception) {
@@ -116,7 +156,122 @@ public class Gateway {
     // body bytes to read. Return immutable headers in an IncomingRequest.
     //
     private static IncomingRequest readRequest(InputStream input) throws IOException {
-        throw new UnsupportedOperationException("TODO: implement readRequest");
+        int[] consumed = {0};
+
+        String requestLine = readLine(input, consumed);
+        String[] parts = requestLine.split(" ", -1);
+
+        if (parts.length != 3
+            || parts[0].isEmpty()
+            || parts[1].isEmpty()
+            || parts[2].isEmpty()){
+                throw new RequestException("Request Line Invalid.");
+            }
+
+        String method = parts[0];
+        String path = parts[1];
+        String version = parts[2];
+
+        if (!"HTTP/1.1".equals(version)){
+            throw new RequestException("Invalid HTTP version.");
+        }
+
+        Map<String, String> headers = new HashMap<>();
+
+        while(true){
+            String line = readLine(input, consumed);
+            if(line.isEmpty()){
+                break;
+            }
+
+            int colon = line.indexOf(':');
+            if(colon < 0){
+                throw new RequestException("Malformed header line");
+            }
+
+            String name = line.substring(0,colon).strip().toLowerCase(Locale.ROOT);
+            String value = line.substring(colon + 1).strip();
+            if(name.isEmpty()){
+                throw new RequestException("Empty header name");
+            }
+
+            if(headers.containsKey(name)){
+                throw new RequestException("Duplicate header: " + name);
+            }
+            headers.put(name, value);
+        }
+
+        String userID = headers.get("x-user-id");
+        if (userID == null){
+            throw new RequestException("Missing x-user-id header");
+        }
+
+        if (!userID.matches("[A-Za-z0-9._-]{1,64}")){
+        throw new UnsupportedOperationException("Invalid x-user-id format");
+        }
+
+        String contentType = headers.get("content-type");
+        if(contentType == null){
+            throw new RequestException("Missing content-type header");
+        }
+        String mediaType = contentType.split(";")[0].trim();
+        if (!mediaType.equalsIgnoreCase("text/plain")){
+            throw new RequestException("content type must be text/plain");
+        }
+
+            // Validate Content-Length.
+        String contentLengthText =
+                headers.get("content-length");
+
+        if (contentLengthText == null) {
+            throw new RequestException(
+                    "Content-Length header is required");
+        }
+
+        int contentLength;
+
+        try {
+            contentLength =
+                    Integer.parseInt(contentLengthText);
+        } catch (NumberFormatException exception) {
+            throw new RequestException(
+                    "Content-Length must be an integer");
+        }
+
+        if (contentLength < 0) {
+            throw new RequestException(
+                    "Content-Length cannot be negative");
+        }
+
+        if (contentLength > MAX_QUERY_BYTES) {
+            throw new RequestException(
+                    "Request body is too large");
+        }
+
+        // Read exactly Content-Length bytes.
+        byte[] bodyBytes = input.readNBytes(contentLength);
+
+        if (bodyBytes.length != contentLength) {
+            throw new RequestException(
+                    "Request body is incomplete");
+        }
+
+        // Decode temporarily to validate the query.
+        String body = new String(
+                bodyBytes,
+                StandardCharsets.UTF_8);
+
+        if (body.isBlank()) {
+            throw new RequestException(
+                    "Query is blank");
+        }
+
+        // Keep the original body bytes in the record.
+        return new IncomingRequest(
+                method,
+                path,
+                Map.copyOf(headers),
+                bodyBytes);
     }
 
     //`````````````````````````````````````````````````````````````````````
@@ -127,7 +282,33 @@ public class Gateway {
     // count, but do not include them in the returned string.
     //
     private static String readLine(InputStream input, int[] consumed) throws IOException {
-        throw new UnsupportedOperationException("TODO: implement readLine");
+        
+    var line = new ByteArrayOutputStream();
+    while (true) {
+        int b = input.read();
+        if (b == -1) {
+            throw new RequestException("Unexpected end of request");
+        }
+        consumed[0]++;
+        if (consumed[0] > MAX_HEADER_BYTES) {
+            throw new RequestException("Request header section too large");
+        }
+        if (b == '\r') {
+            int next = input.read();
+            if (next != '\n') {
+                throw new RequestException("CR not followed by LF");
+            }
+        consumed[0]++;
+        // don't need to re-check limit for this one byte
+        return line.toString(StandardCharsets.US_ASCII);
+        }
+        if (b == '\n') {
+            throw new RequestException("Bare LF in request header");
+        }
+        line.write(b);
+}
+        
+        //throw new UnsupportedOperationException("TODO: implement readLine");
     }
 
     //`````````````````````````````````````````````````````````````````````
@@ -218,6 +399,36 @@ public class Gateway {
     //
     private static void writeResponse(OutputStream output, int status, String reason, String body,
                                        Map<String, String> extraHeaders) throws IOException {
+        
+        byte[] bodyBytes = body.getBytes(StandardCharsets.UTF_8);
+
+        var headers = new StringBuilder();
+
+        headers.append("HTTP/1.1 ")
+            .append(status)
+            .append(' ')
+            .append(reason)
+            .append("\r\n");      
+            
+        headers.append("Content-Type: text/plain; charset=utf-8\r\n");
+        headers.append("Content-Length: ")
+                .append(bodyBytes.length)
+                .append("\r\n");
+        headers.append("Connection: close\r\n");
+
+        for (Map.Entry<String, String> entry : extraHeaders.entrySet()) {
+            headers.append(entry.getKey())
+                .append(": ")
+                .append(entry.getValue())
+                .append("\r\n");
+    }
+
+        headers.append("\r\n");
+
+        output.write(
+        headers.toString().getBytes(StandardCharsets.US_ASCII));
+        output.write(bodyBytes);
+        output.flush();
         throw new UnsupportedOperationException("TODO: implement writeResponse");
     }
 
